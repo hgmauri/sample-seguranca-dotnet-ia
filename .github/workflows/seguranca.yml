@@ -1,0 +1,49 @@
+name: seguranca
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-auditoria-e-ataques:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # NuGet Audit roda no restore: vulnerabilidade moderada ou maior quebra o build (Directory.Build.props)
+      - name: Build
+        run: dotnet build sample-seguranca-dotnet-ia.slnx -c Release
+
+      - name: Pacotes vulneráveis (inclui transitivos)
+        run: dotnet list sample-seguranca-dotnet-ia.slnx package --vulnerable --include-transitive
+
+      # Teste de segurança de verdade: os ataques precisam passar no /inseguro e falhar no /seguro
+      - name: Ataques
+        run: |
+          dotnet run --project src/Pedidos.Api -c Release --no-build --urls http://localhost:5300 &
+          for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:5300/interno/metadados && break; sleep 1; done
+          dotnet run --project src/Pedidos.Ataques -c Release --no-build -- http://localhost:5300
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+          build-mode: none
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@v4
